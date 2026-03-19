@@ -209,8 +209,13 @@ class LiveInference:
     def _candle_completion_pct(self) -> float:
         """Estimate how far through the current candle we are (0–100 %)."""
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        elapsed = now_ms - self._live.open_time_ms
-        return min(100.0, elapsed / self.interval_ms * 100)
+        if self._live.open_time_ms == 0:
+            # WebSocket hasn't sent first tick yet — calculate from wall clock
+            candle_start_ms = (now_ms // self.interval_ms) * self.interval_ms
+            elapsed = now_ms - candle_start_ms
+        else:
+            elapsed = now_ms - self._live.open_time_ms
+        return min(99.9, elapsed / self.interval_ms * 100)
 
     # ---- build feature vector ----
 
@@ -273,14 +278,33 @@ class LiveInference:
 
         direction = "UP  ▲" if prob >= 0.5 else "DOWN ▼"
         confidence = max(prob, 1 - prob) * 100
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        # Time — show both UTC and local
+        now_utc   = datetime.now(timezone.utc)
+        now_local = datetime.now().astimezone()
+        utc_str   = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
+        local_str = now_local.strftime("%H:%M:%S %Z")
+
+        # Last price — fall back to last closed candle if WebSocket not ready
+        last_price = self._live.close
+        price_str  = f"${last_price:,.2f}" if last_price > 0 else f"${self._history['close'].iloc[-1]:,.2f} (last close)"
+
+        # Next candle window
+        now_ms = int(now_utc.timestamp() * 1000)
+        candle_start_ms  = (now_ms // self.interval_ms) * self.interval_ms
+        candle_end_ms    = candle_start_ms + self.interval_ms
+        next_start_ms    = candle_end_ms
+        next_end_ms      = next_start_ms + self.interval_ms
+        next_start_local = datetime.fromtimestamp(next_start_ms / 1000).strftime("%H:%M")
+        next_end_local   = datetime.fromtimestamp(next_end_ms   / 1000).strftime("%H:%M")
 
         print(
-            f"[{now_str}]  {self.symbol} {self.interval}  "
-            f"→ {direction}  "
-            f"confidence={confidence:.1f}%  "
-            f"candle={completion:.1f}% complete  "
-            f"last_price={self._live.close:.2f}"
+            f"[{utc_str} / {local_str}]  {self.symbol} {self.interval}\n"
+            f"  Predicting candle: {next_start_local} → {next_end_local} (local)\n"
+            f"  Direction:         {direction}\n"
+            f"  Confidence:        {confidence:.1f}%\n"
+            f"  Current candle:    {completion:.1f}% complete\n"
+            f"  Last price:        {price_str}\n"
         )
 
     # ---- main loop ----
