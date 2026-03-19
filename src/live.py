@@ -16,15 +16,7 @@ Usage
 -----
     python -m src.live \\
         --model-path models/lgbm_5m.pkl \\
-        --model-type lgbm \\
-        --interval 5m \\
-        --window 50
-
-    python -m src.live \\
-        --model-path models/lstm_1h \\
-        --model-type lstm \\
-        --interval 1h \\
-        --window 60
+        --interval 5m
 """
 
 import argparse
@@ -94,13 +86,11 @@ class LiveInference:
     Parameters
     ----------
     model_path : str or Path
-        Path to the saved model (without extension for LSTM/TFT).
-    model_type : str
-        One of: "lr", "lgbm", "lstm", "tft".
+        Path to the saved LightGBM model (.pkl).
     interval : str
         Candle interval: "1m", "5m", "30m", or "1h".
     window_size : int
-        Number of candles in the model's input window.
+        Number of candles to keep in history buffer.
     symbol : str
         Binance symbol, default "BTCUSDT".
     infer_every : int
@@ -110,7 +100,7 @@ class LiveInference:
     def __init__(
         self,
         model_path: str | Path,
-        model_type: str,
+        model_type: str = "lgbm",
         interval: str = "5m",
         window_size: int = 50,
         symbol: str = SYMBOL,
@@ -274,26 +264,8 @@ class LiveInference:
         completion = self._candle_completion_pct()
 
         try:
-            if self.model_type in ("lr", "lgbm"):
-                # Use only the last row (most recent candle = live candle)
-                X = featured[feat_cols].values[-1:].astype(np.float32)
-                prob = float(self.model.predict_proba(X)[-1])
-
-            elif self.model_type == "lstm":
-                from src.features import create_windows
-                X, _ = create_windows(
-                    featured.assign(target=0),  # dummy target for windowing
-                    window_size=self.window_size,
-                )
-                # Take the last window (covers history + live candle)
-                X_last = X[-1:].astype(np.float32)
-                prob = float(self.model.predict_proba(X_last)[-1])
-
-            elif self.model_type == "tft":
-                prob = float(self.model.predict_proba(featured)[-1])
-
-            else:
-                raise ValueError(f"Unknown model_type: {self.model_type}")
+            X = featured[feat_cols].values[-1:].astype(np.float32)
+            prob = float(self.model.predict_proba(X)[-1])
 
         except Exception as exc:
             print(f"[live] Inference error: {exc}")
@@ -362,7 +334,7 @@ def main() -> None:
         help="Path to saved model (without extension for LSTM/TFT).",
     )
     parser.add_argument(
-        "--model-type", required=True, choices=["lr", "lgbm", "lstm", "tft"],
+        "--model-type", default="lgbm", choices=["lgbm"],
         help="Model type.",
     )
     parser.add_argument(

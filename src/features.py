@@ -10,7 +10,6 @@ add_volume_zscore(df, window)         -> pd.DataFrame
 add_time_features(df)                 -> pd.DataFrame
 create_labels(df, horizon)            -> pd.DataFrame
 build_features(df)                    -> pd.DataFrame   (full pipeline)
-create_windows(df, window_size, target_col) -> (np.ndarray, np.ndarray)
 """
 
 import numpy as np
@@ -281,63 +280,6 @@ def build_features(
 
     print(f"[features] Done  (rows after: {len(df):,},  features: {len(get_feature_cols(df))})")
     return df
-
-
-# ---------------------------------------------------------------------------
-# 7. Sliding window arrays for LSTM / TFT
-# ---------------------------------------------------------------------------
-
-def create_windows(
-    df: pd.DataFrame,
-    window_size: int,
-    target_col: str = "target",
-) -> tuple[np.ndarray, np.ndarray]:
-    """Create overlapping sliding-window samples from a feature DataFrame.
-
-    For each position t, a sample consists of:
-        X[t]  = feature matrix of shape (window_size, n_features)
-                covering candles [t − window_size + 1 … t]
-        y[t]  = target value at candle t  (the label for candle t)
-
-    Samples are built in strict chronological order — no shuffling.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Output of :func:`build_features`.  Must contain `target_col` and at
-        least the feature columns returned by :func:`get_feature_cols`.
-    window_size : int
-        Number of candles per input sequence (lookback window).
-    target_col : str
-        Name of the target column (default 'target').
-
-    Returns
-    -------
-    X : np.ndarray, shape (n_samples, window_size, n_features)
-    y : np.ndarray, shape (n_samples,)
-    """
-    feature_cols = get_feature_cols(df)
-    feature_arr = df[feature_cols].values.astype(np.float32)
-    target_arr = df[target_col].values.astype(np.float32)
-
-    n = len(df)
-    if n < window_size:
-        raise ValueError(
-            f"DataFrame has {n} rows but window_size={window_size}. "
-            "Need at least window_size rows."
-        )
-
-    n_samples = n - window_size + 1
-    X = np.lib.stride_tricks.sliding_window_view(
-        feature_arr, window_shape=(window_size, feature_arr.shape[1])
-    ).reshape(n_samples, window_size, len(feature_cols))
-
-    # y aligns with the last candle in each window
-    y = target_arr[window_size - 1:]
-
-    print(f"[features] Windows: X={X.shape}, y={y.shape}  "
-          f"(window_size={window_size}, features={len(feature_cols)})")
-    return X, y
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,6 @@ Evaluation utilities for all models and horizons.
 Public API
 ----------
 chronological_split(df, train, val)      -> (train_df, val_df, test_df)
-split_windows(X, y, train, val)          -> ((Xtr,ytr), (Xvl,yvl), (Xte,yte))
 compute_metrics(y_true, y_pred, y_prob)  -> dict
 evaluate_model(model, X_test, y_test)    -> dict
 plot_confusion_matrix(y_true, y_pred, title, ax)
@@ -59,39 +58,6 @@ def chronological_split(
     return train, val, test
 
 
-def split_windows(
-    X: np.ndarray,
-    y: np.ndarray,
-    train_ratio: float = 0.70,
-    val_ratio: float = 0.15,
-) -> tuple:
-    """Split pre-built windowed arrays chronologically.
-
-    Parameters
-    ----------
-    X : np.ndarray, shape (n, window, features)  or  (n, features)
-    y : np.ndarray, shape (n,)
-
-    Returns
-    -------
-    (X_train, y_train), (X_val, y_val), (X_test, y_test)
-    """
-    n = len(y)
-    train_end = int(n * train_ratio)
-    val_end = int(n * (train_ratio + val_ratio))
-
-    splits = (
-        (X[:train_end],       y[:train_end]),
-        (X[train_end:val_end], y[train_end:val_end]),
-        (X[val_end:],          y[val_end:]),
-    )
-    names = ("train", "val", "test")
-    for name, (Xs, ys) in zip(names, splits):
-        print(f"[eval]   {name:5s}: X={Xs.shape}  y={ys.shape}  "
-              f"pos_rate={ys.mean():.3f}")
-    return splits
-
-
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
@@ -133,15 +99,12 @@ def compute_metrics(
 def evaluate_model(model, X_test, y_test: np.ndarray) -> dict:
     """Run a trained model on the test set and return metrics + raw outputs.
 
-    Works with flat (LR/LGBM) and windowed (LSTM) inputs.
-    For TFT, pass a feature DataFrame as X_test.
-
     Parameters
     ----------
     model
-        Any model with .predict() and .predict_proba() methods.
-    X_test
-        2-D ndarray, 3-D ndarray, or DataFrame depending on model_type.
+        LightGBMModel with .predict() and .predict_proba() methods.
+    X_test : np.ndarray
+        2-D array (n_samples, n_features).
     y_test : np.ndarray
 
     Returns

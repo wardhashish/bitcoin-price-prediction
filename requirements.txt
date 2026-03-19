@@ -4,10 +4,6 @@ ta
 python-binance
 scikit-learn
 lightgbm
-tensorflow-macos
-tensorflow-metal
-pytorch-forecasting
-torch
 matplotlib
 seaborn
 jupyter
