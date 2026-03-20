@@ -53,14 +53,27 @@ src/
 ```bash
 # Install dependencies
 pip install -r requirements.txt
+```
 
-# Run live inference (no retraining needed — models included)
-python3 -m src.live --model-path models/lgbm_1h.pkl --model-type lgbm --interval 1h --window 48
+**Option A — Notebook (no terminal needed)**
+
+Open `notebooks/05_evaluation.ipynb` and run the last cell ("Live Prediction (Single-Shot)").
+It fetches the latest 1h candles from Binance, builds features, and prints the prediction inline.
+
+**Option B — Terminal (live WebSocket stream)**
+
+```bash
+python3 -m src.live --model-path models/lgbm_1h.pkl --interval 1h
 ```
 
 Expected output every 60 seconds:
 ```
-[2026-03-19 03:10:05 UTC]  BTCUSDT 1h  → UP ▲  confidence=58.3%  candle=100.0% complete  last_price=83500.00
+[2026-03-19 03:10:05 UTC / 06:10:05 AST]  BTCUSDT 1h
+  Predicting candle: 06:00 → 07:00 (local)
+  Direction:         UP  ▲
+  Confidence:        58.3%
+  Current candle:    45.2% complete
+  Last price:        $83,500.00
 ```
 
 ## Split Strategy

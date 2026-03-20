@@ -355,7 +355,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--model-path", required=True,
-        help="Path to saved model (without extension for LSTM/TFT).",
+        help="Path to saved LightGBM model (.pkl), e.g. models/lgbm_1h.pkl.",
     )
     parser.add_argument(
         "--model-type", default="lgbm", choices=["lgbm"],
