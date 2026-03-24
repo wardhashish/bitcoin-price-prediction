@@ -11,6 +11,8 @@ add_volume_zscore(df, window)         -> pd.DataFrame
 add_time_features(df)                 -> pd.DataFrame
 create_labels(df, horizon)            -> pd.DataFrame
 build_features(df)                    -> pd.DataFrame   (full pipeline)
+add_higher_tf_features(df, df_high, prefix, cols) -> pd.DataFrame
+build_all_multitf(frames)             -> dict[str, pd.DataFrame]
 """
 
 import numpy as np
@@ -280,3 +282,108 @@ _OHLCV = {"open", "high", "low", "close", "volume"}
 def get_feature_cols(df: pd.DataFrame) -> list[str]:
     """Return feature column names (excludes OHLCV and 'target')."""
     return [c for c in df.columns if c not in _OHLCV and c != "target"]
+
+
+# ---------------------------------------------------------------------------
+# Multi-timeframe features
+# ---------------------------------------------------------------------------
+
+# Features to borrow from a higher timeframe — chosen for regime/trend signal
+_HIGHER_TF_COLS = [
+    "rsi_14",          # trend momentum from higher TF
+    "macd_hist",       # momentum direction from higher TF
+    "bb_width",        # volatility regime from higher TF
+    "adx_14",          # is higher TF trending or ranging?
+    "ema_cross",       # fast/slow EMA relationship on higher TF
+    "candle_body",     # last closed higher-TF candle direction
+    "taker_buy_ratio", # order flow pressure on higher TF
+]
+
+
+def add_higher_tf_features(
+    df_low: pd.DataFrame,
+    df_high: pd.DataFrame,
+    prefix: str,
+    cols: list[str] = _HIGHER_TF_COLS,
+) -> pd.DataFrame:
+    """Forward-fill higher-timeframe features onto a lower-timeframe DataFrame.
+
+    Each candle in df_low gets the most recent completed higher-TF candle's
+    feature values — exactly how a trader reads a multi-timeframe chart.
+
+    Parameters
+    ----------
+    df_low : pd.DataFrame
+        Lower timeframe DataFrame (e.g. 5m) with features already built.
+    df_high : pd.DataFrame
+        Higher timeframe DataFrame (e.g. 1h) with features already built.
+    prefix : str
+        Column prefix for the added features, e.g. "h1h_".
+    cols : list[str]
+        Which columns to take from df_high (default: _HIGHER_TF_COLS).
+
+    Returns
+    -------
+    pd.DataFrame
+        df_low with new prefixed columns added.
+    """
+    df_low = df_low.copy()
+    available = [c for c in cols if c in df_high.columns]
+
+    for col in available:
+        # Reindex higher-TF series to lower-TF timestamps, forward-fill
+        reindexed = df_high[col].reindex(df_low.index, method="ffill")
+        df_low[f"{prefix}{col}"] = reindexed
+
+    print(f"[features] Added {len(available)} higher-TF features with prefix '{prefix}'")
+    return df_low
+
+
+def build_all_multitf(frames: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
+    """Build features for all timeframes and add multi-timeframe context.
+
+    Multi-TF enrichment applied:
+        5m  ← 15m features (prefix h15m_) + 1h features (prefix h1h_)
+        15m ← 1h features  (prefix h1h_)
+        30m ← 1h features  (prefix h1h_)
+        1h  ← no higher TF (already the highest)
+
+    Parameters
+    ----------
+    frames : dict[str, pd.DataFrame]
+        Raw OHLCV frames keyed by label ("5m", "15m", "30m", "1h").
+        Each frame must have a 'taker_buy_ratio' and 'fear_greed' column.
+
+    Returns
+    -------
+    dict[str, pd.DataFrame]
+        Feature-engineered frames with multi-TF columns added.
+    """
+    print("[features] Building multi-timeframe feature set …")
+
+    # Step 1: build base features on all timeframes
+    feat = {}
+    for label, df in frames.items():
+        print(f"\n  [{label}] base features …")
+        feat[label] = build_features(df)
+
+    # Step 2: add higher-TF context to lower timeframes
+    print("\n[features] Adding higher-TF context …")
+    feat["5m"]  = add_higher_tf_features(feat["5m"],  feat["15m"], "h15m_")
+    feat["5m"]  = add_higher_tf_features(feat["5m"],  feat["1h"],  "h1h_")
+    feat["15m"] = add_higher_tf_features(feat["15m"], feat["1h"],  "h1h_")
+    feat["30m"] = add_higher_tf_features(feat["30m"], feat["1h"],  "h1h_")
+
+    # Drop any rows where forward-fill left NaN (first few candles)
+    for label in feat:
+        before = len(feat[label])
+        feat[label] = feat[label].dropna(subset=get_feature_cols(feat[label]))
+        dropped = before - len(feat[label])
+        if dropped:
+            print(f"[features] {label}: dropped {dropped} NaN rows from HTF forward-fill")
+
+    for label, df in feat.items():
+        n_feat = len(get_feature_cols(df))
+        print(f"[features] {label}: {len(df):,} rows, {n_feat} features")
+
+    return feat
