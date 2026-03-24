@@ -2,7 +2,7 @@
 
 **CMPS 261 — Machine Learning Course Project**
 
-Predicts Bitcoin (BTC/USDT) price direction (up/down) across three time horizons: **5 minutes**, **30 minutes**, and **1 hour** using LightGBM.
+Predicts Bitcoin (BTC/USDT) price direction (up/down) across four time horizons: **5 minutes**, **15 minutes**, **30 minutes**, and **1 hour** using LightGBM.
 
 ## Model
 
@@ -11,6 +11,7 @@ Predicts Bitcoin (BTC/USDT) price direction (up/down) across three time horizons
 | Horizon | Accuracy | F1 | ROC-AUC |
 |---|---|---|---|
 | 5m | 51.36% | 0.489 | 0.522 |
+| 15m | TBD | TBD | TBD |
 | 30m | 52.33% | 0.540 | 0.531 |
 | **1h** | **53.19%** | **0.544** | **0.538** |
 
@@ -32,10 +33,11 @@ data/
   processed/    # resampled CSVs (gitignored)
 models/
   lgbm_5m.pkl   # trained LightGBM — 5m horizon
+  lgbm_15m.pkl  # trained LightGBM — 15m horizon
   lgbm_30m.pkl  # trained LightGBM — 30m horizon
   lgbm_1h.pkl   # trained LightGBM — 1h horizon
 notebooks/
-  01_data_pipeline.ipynb  # fetch, merge, resample data
+  01_data_pipeline.ipynb  # fetch, merge, resample data (5m, 15m, 30m, 1h)
   02_eda.ipynb            # exploratory data analysis
   03_features.ipynb       # feature engineering
   04_models.ipynb         # LightGBM training
