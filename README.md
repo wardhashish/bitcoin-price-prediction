@@ -23,7 +23,11 @@ Predicts Bitcoin (BTC/USDT) price direction (up/down) across four time horizons:
 
 ## Features
 
-Lagged returns (ret_1, ret_2, ret_4, ret_6, ret_12, ret_24), RSI-14, MACD, Bollinger Band width, ATR-14, volume z-score, hour of day, day of week — 15 features total.
+**Base:** Lagged returns (ret_1/2/4/6/12/24), RSI-14, MACD (line/signal/hist), Bollinger Band width, ATR-14, volume z-score, hour of day, day of week
+
+**Tier-1 advanced:** Candle body, upper wick, lower wick, ADX-14, Stochastic %K/%D, MFI-14, OBV rate-of-change, EMA ratio (fast/slow), EMA cross signal
+
+**Total: 26 features**
 
 ## Project Structure
 
