@@ -570,6 +570,103 @@ def enrich_with_taker_buy_ratio(
 
 
 # ---------------------------------------------------------------------------
+# 8. Fear & Greed Index
+# ---------------------------------------------------------------------------
+
+def fetch_fear_greed_index() -> pd.DataFrame:
+    """Fetch the Bitcoin Fear & Greed Index from alternative.me (no API key needed).
+
+    Returns daily values:
+        0–24   = Extreme Fear
+        25–49  = Fear
+        50     = Neutral
+        51–74  = Greed
+        75–100 = Extreme Greed
+
+    The index captures crowd sentiment — historically, extreme fear = buying
+    opportunity; extreme greed = caution. Useful as a market regime signal.
+
+    Returns
+    -------
+    pd.DataFrame
+        Single column 'fear_greed' (int 0–100) with UTC DatetimeIndex (daily).
+    """
+    import json
+    import urllib.request
+
+    url = "https://api.alternative.me/fng/?limit=0&format=json"
+    print("[data] Fetching Fear & Greed Index from alternative.me …")
+
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            data = json.loads(resp.read())
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to fetch Fear & Greed Index: {exc}. "
+            "Check your internet connection."
+        ) from exc
+
+    records = data.get("data", [])
+    if not records:
+        raise RuntimeError("Fear & Greed API returned empty data.")
+
+    df = pd.DataFrame(records)
+    df["timestamp"]   = pd.to_datetime(df["timestamp"].astype(int), unit="s", utc=True)
+    df["fear_greed"]  = df["value"].astype(int)
+    df = df.set_index("timestamp")[["fear_greed"]].sort_index()
+
+    print(f"[data] Fear & Greed: {len(df):,} days  "
+          f"({df.index[0].date()} → {df.index[-1].date()})  "
+          f"mean={df['fear_greed'].mean():.1f}")
+    return df
+
+
+def enrich_with_fear_greed(
+    frames: dict[str, pd.DataFrame],
+    neutral_fill: int = 50,
+) -> dict[str, pd.DataFrame]:
+    """Add fear_greed column to each processed frame.
+
+    The daily F&G value is forward-filled to match each candle's timestamp.
+    Candles before F&G coverage (pre-2018) are filled with `neutral_fill` (50).
+
+    Parameters
+    ----------
+    frames : dict[str, pd.DataFrame]
+        Processed OHLCV frames (output of resample_ohlcv or loaded from CSV).
+    neutral_fill : int
+        Value for rows outside F&G coverage (default 50 = neutral).
+
+    Returns
+    -------
+    dict[str, pd.DataFrame]
+        Same frames with an added 'fear_greed' column.
+    """
+    fg = fetch_fear_greed_index()
+
+    enriched = {}
+    for label, df in frames.items():
+        df = df.copy()
+
+        # Reindex F&G to match the candle timestamps, forward-fill within each day
+        fg_reindexed = fg.reindex(df.index, method="ffill")
+
+        # For any remaining NaN (before F&G history), backward-fill then neutral
+        fg_reindexed = fg_reindexed.bfill().fillna(neutral_fill)
+
+        df["fear_greed"] = fg_reindexed["fear_greed"].astype(int)
+
+        n_neutral = (df["fear_greed"] == neutral_fill).sum()
+        print(f"[data] {label}: fear_greed added  "
+              f"mean={df['fear_greed'].mean():.1f}  "
+              f"neutral_filled={n_neutral:,}")
+
+        enriched[label] = df
+
+    return enriched
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
