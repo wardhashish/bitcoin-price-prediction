@@ -424,6 +424,152 @@ def run_pipeline(
 
 
 # ---------------------------------------------------------------------------
+# 7. Taker buy ratio enrichment
+# ---------------------------------------------------------------------------
+
+_BINANCE_INTERVAL_MAP = {
+    "5m":  "5m",
+    "15m": "15m",
+    "30m": "30m",
+    "1h":  "1h",
+}
+
+
+def fetch_taker_buy_ratio(
+    interval: str,
+    start: str = "2021-01-01",
+    end: str | None = None,
+    symbol: str = BINANCE_SYMBOL,
+) -> pd.DataFrame:
+    """Fetch taker_buy_ratio at a given candle interval directly from Binance.
+
+    taker_buy_ratio = taker_buy_base_volume / total_volume
+      ≈ 1.0  → aggressive buyers dominating (bullish pressure)
+      ≈ 0.0  → aggressive sellers dominating (bearish pressure)
+      ≈ 0.5  → balanced
+
+    This is an order-flow signal not available in OHLCV alone.
+
+    Parameters
+    ----------
+    interval : str
+        One of "5m", "15m", "30m", "1h".
+    start : str
+        ISO date string, e.g. "2021-01-01".
+    end : str or None
+        ISO date string. Defaults to today (UTC).
+    symbol : str
+        Binance symbol, default "BTCUSDT".
+
+    Returns
+    -------
+    pd.DataFrame
+        Single column 'taker_buy_ratio' with UTC DatetimeIndex.
+    """
+    try:
+        from binance.client import Client
+    except ImportError as exc:
+        raise ImportError("Run: pip install python-binance") from exc
+
+    if interval not in _BINANCE_INTERVAL_MAP:
+        raise ValueError(f"interval must be one of {list(_BINANCE_INTERVAL_MAP)}")
+
+    if end is None:
+        end = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    end_dt   = datetime.strptime(end,   "%Y-%m-%d").replace(tzinfo=timezone.utc)
+
+    client = Client()
+    rows = []
+    current_ms = int(start_dt.timestamp() * 1000)
+    end_ms     = int(end_dt.timestamp()   * 1000)
+    total      = 0
+
+    print(f"[data] Fetching taker_buy_ratio  {interval}  {start} → {end} …")
+
+    while current_ms < end_ms:
+        try:
+            klines = client.get_klines(
+                symbol=symbol,
+                interval=_BINANCE_INTERVAL_MAP[interval],
+                startTime=current_ms,
+                endTime=end_ms,
+                limit=BINANCE_LIMIT,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Binance API failed: {exc}") from exc
+
+        if not klines:
+            break
+
+        rows.extend(klines)
+        total += len(klines)
+        current_ms = klines[-1][0] + 1
+        print(f"[data]   … {total:,} candles", end="\r")
+        time.sleep(0.25)
+
+    print()
+
+    df = pd.DataFrame(rows, columns=[
+        "open_time", "open", "high", "low", "close", "volume",
+        "close_time", "quote_volume", "num_trades",
+        "taker_buy_base", "taker_buy_quote", "ignore",
+    ])
+    df["timestamp"]       = pd.to_datetime(df["open_time"], unit="ms", utc=True)
+    df["taker_buy_base"]  = pd.to_numeric(df["taker_buy_base"],  errors="coerce")
+    df["volume"]          = pd.to_numeric(df["volume"],          errors="coerce")
+    df["taker_buy_ratio"] = df["taker_buy_base"] / (df["volume"] + 1e-9)
+    df = df.set_index("timestamp")[["taker_buy_ratio"]].dropna().sort_index()
+
+    print(f"[data] taker_buy_ratio {interval}: {len(df):,} candles  "
+          f"({df.index[0].date()} → {df.index[-1].date()})")
+    return df
+
+
+def enrich_with_taker_buy_ratio(
+    frames: dict[str, pd.DataFrame],
+    binance_start: str = "2021-01-01",
+    neutral_fill: float = 0.5,
+) -> dict[str, pd.DataFrame]:
+    """Add taker_buy_ratio to each processed frame by fetching from Binance.
+
+    Rows outside Binance coverage (e.g. Kaggle 2019-2021 period) are filled
+    with `neutral_fill` (0.5 = balanced buy/sell pressure).
+
+    Parameters
+    ----------
+    frames : dict[str, pd.DataFrame]
+        Output of resample_ohlcv or loaded from data/processed/.
+    binance_start : str
+        Start date for Binance fetch (should match the original pipeline).
+    neutral_fill : float
+        Value used for rows without Binance coverage (default 0.5).
+
+    Returns
+    -------
+    dict[str, pd.DataFrame]
+        Same frames with an added 'taker_buy_ratio' column.
+    """
+    enriched = {}
+    for label, df in frames.items():
+        tbr = fetch_taker_buy_ratio(label, start=binance_start)
+        df  = df.copy().join(tbr, how="left")
+
+        n_missing = df["taker_buy_ratio"].isna().sum()
+        if n_missing > 0:
+            df["taker_buy_ratio"] = df["taker_buy_ratio"].fillna(neutral_fill)
+            print(f"[data] {label}: filled {n_missing:,} pre-Binance rows with {neutral_fill}")
+
+        enriched[label] = df
+        rng = df["taker_buy_ratio"]
+        print(f"[data] {label}: taker_buy_ratio  "
+              f"mean={rng.mean():.3f}  min={rng.min():.3f}  max={rng.max():.3f}")
+
+    return enriched
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
